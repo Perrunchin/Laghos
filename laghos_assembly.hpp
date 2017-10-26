@@ -40,6 +40,10 @@ struct QuadratureData
    // only at time zero and stored here.
    DenseTensor Jac0inv;
 
+   // Viscosity data that depends on the stress tensor and needs to be updated
+   // at every time step
+   Vector mu;
+
    // Quadrature data used for full/partial assembly of the force operator. At
    // each quadrature point, it combines the stress, inverse Jacobian,
    // determinant of the Jacobian and the integration weight. It must be
@@ -62,7 +66,7 @@ struct QuadratureData
    double dt_est;
 
    QuadratureData(int dim, int nzones, int quads_per_zone)
-      : Jac0inv(dim, dim, nzones * quads_per_zone),
+      : Jac0inv(dim, dim, nzones * quads_per_zone), mu(nzones * quads_per_zone),
         stressJinvT(nzones * quads_per_zone, dim, dim),
         rho0DetJ0w(nzones * quads_per_zone) { }
 };
@@ -104,6 +108,22 @@ private:
 
 public:
    DensityIntegrator(QuadratureData &quad_data_) : quad_data(quad_data_) { }
+
+   virtual void AssembleRHSElementVect(const FiniteElement &fe,
+                                       ElementTransformation &Tr,
+                                       Vector &elvect);
+};
+
+// This class is used only for visualization. It assembles (mu, phi) in each
+// zone, which is used by LagrangianHydroOperator::ComputeViscosity to do an L2
+// projection of the density.
+class ViscosityIntegrator : public LinearFormIntegrator
+{
+private:
+   const QuadratureData &quad_data;
+
+public:
+   ViscosityIntegrator(QuadratureData &quad_data_) : quad_data(quad_data_) { }
 
    virtual void AssembleRHSElementVect(const FiniteElement &fe,
                                        ElementTransformation &Tr,

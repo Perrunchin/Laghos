@@ -300,7 +300,25 @@ void DensityIntegrator::AssembleRHSElementVect(const FiniteElement &fe,
    {
       fe.CalcShape(IntRule->IntPoint(q), shape);
       // Note that rhoDetJ = rho0DetJ0.
-      shape *= quad_data.rho0DetJ0w(Tr.ElementNo*ip_cnt + q);
+      shape *= quad_data.rho0DetJ0w(Tr.ElementNo * ip_cnt + q);
+      elvect += shape;
+   }
+}
+
+void ViscosityIntegrator::AssembleRHSElementVect(const FiniteElement &fe,
+                                               ElementTransformation &Tr,
+                                               Vector &elvect)
+{
+   const int ip_cnt = IntRule->GetNPoints();
+   Vector shape(fe.GetDof());
+
+   elvect.SetSize(fe.GetDof());
+   elvect = 0.0;
+
+   for (int q = 0; q < ip_cnt; q++)
+   {
+      fe.CalcShape(IntRule->IntPoint(q), shape);
+      shape *= IntRule->IntPoint(q).weight * quad_data.mu(Tr.ElementNo * ip_cnt + q);
       elvect += shape;
    }
 }

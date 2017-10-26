@@ -49,117 +49,117 @@ double gamma(const Vector &);
 
 struct TimingData
 {
-   // Total times for all major computations:
-   // CG solves (H1 and L2) / force RHS assemblies / quadrature computations.
-   StopWatch sw_cgH1, sw_cgL2, sw_force, sw_qdata;
+    // Total times for all major computations:
+    // CG solves (H1 and L2) / force RHS assemblies / quadrature computations.
+    StopWatch sw_cgH1, sw_cgL2, sw_force, sw_qdata;
 
-   // These accumulate the total processed dofs or quad points:
-   // #dofs  * #(CG iterations) for the CG solves (H1 and L2).
-   // #dofs  * #(RK sub steps) for the Force application and assembly.
-   // #quads * #(RK sub steps) for the quadrature data computations.
-   long long int H1dof_iter, L2dof_iter, dof_tstep, quad_tstep;
-
-   TimingData()
-      : H1dof_iter(0), L2dof_iter(0), dof_tstep(0), quad_tstep(0) { }
+    // These accumulate the total processed dofs or quad points:
+    // #dofs  * #(CG iterations) for the CG solves (H1 and L2).
+    // #dofs  * #(RK sub steps) for the Force application and assembly.
+    // #quads * #(RK sub steps) for the quadrature data computations.
+    long long int H1dof_iter, L2dof_iter, dof_tstep, quad_tstep;
+    TimingData() : H1dof_iter(0), L2dof_iter(0), dof_tstep(0), quad_tstep(0) { }
 };
 
 // Given a solutions state (x, v, e), this class performs all necessary
 // computations to evaluate the new slopes (dx_dt, dv_dt, de_dt).
 class LagrangianHydroOperator : public TimeDependentOperator
 {
-protected:
-   ParFiniteElementSpace &H1FESpace;
-   ParFiniteElementSpace &L2FESpace;
-   mutable ParFiniteElementSpace H1compFESpace;
+    protected:
+        ParFiniteElementSpace &H1FESpace;
+        ParFiniteElementSpace &L2FESpace;
+        mutable ParFiniteElementSpace H1compFESpace;
 
-   Array<int> &ess_tdofs;
+        Array<int> &ess_tdofs;
+        const int dim, nzones, l2dofs_cnt, h1dofs_cnt, source_type;
+        const double cfl;
+        const bool use_viscosity, p_assembly;
+        const double cg_rel_tol;
+        const int cg_max_iter;
+        Coefficient *material_pcf;
 
-   const int dim, nzones, l2dofs_cnt, h1dofs_cnt, source_type;
-   const double cfl;
-   const bool use_viscosity, p_assembly;
-   const double cg_rel_tol;
-   const int cg_max_iter;
-   Coefficient *material_pcf;
+        // Velocity mass matrix and local inverses of the energy mass matrices. These
+        // are constant in time, due to the pointwise mass conservation property.
+        mutable ParBilinearForm Mv;
+        DenseTensor Me_inv;
 
-   // Velocity mass matrix and local inverses of the energy mass matrices. These
-   // are constant in time, due to the pointwise mass conservation property.
-   mutable ParBilinearForm Mv;
-   DenseTensor Me_inv;
+        // Integration rule for all assemblies.
+        const IntegrationRule &integ_rule;
 
-   // Integration rule for all assemblies.
-   const IntegrationRule &integ_rule;
+        // Data associated with each quadrature point in the mesh. These values are
+        // recomputed at each time step.
+        mutable QuadratureData quad_data;
+        mutable bool quad_data_is_current;
 
-   // Data associated with each quadrature point in the mesh. These values are
-   // recomputed at each time step.
-   mutable QuadratureData quad_data;
-   mutable bool quad_data_is_current;
+        // Force matrix that combines the kinematic and thermodynamic spaces. It is
+        // assembled in each time step and then it's used to compute the final
+        // right-hand sides for momentum and specific internal energy.
+        mutable MixedBilinearForm Force;
 
-   // Force matrix that combines the kinematic and thermodynamic spaces. It is
-   // assembled in each time step and then it's used to compute the final
-   // right-hand sides for momentum and specific internal energy.
-   mutable MixedBilinearForm Force;
+        // Same as above, but done through partial assembly.
+        ForcePAOperator ForcePA;
 
-   // Same as above, but done through partial assembly.
-   ForcePAOperator ForcePA;
+        // Mass matrices done through partial assembly:
+        // velocity (coupled H1 assembly) and energy (local L2 assemblies).
+        mutable MassPAOperator VMassPA;
+        mutable LocalMassPAOperator locEMassPA;
 
-   // Mass matrices done through partial assembly:
-   // velocity (coupled H1 assembly) and energy (local L2 assemblies).
-   mutable MassPAOperator VMassPA;
-   mutable LocalMassPAOperator locEMassPA;
+        // Linear solver for energy.
+        CGSolver locCG;
 
-   // Linear solver for energy.
-   CGSolver locCG;
+        mutable TimingData timer;
 
-   mutable TimingData timer;
+        void ComputeMaterialProperties(int nvalues, const double gamma[],
+                                       const double rho[], const double e[],
+                                       double p[], double cs[]) const
+        {
+            for (int v = 0; v < nvalues; v++)
+            {
+                p[v]  = (gamma[v] - 1.0) * rho[v] * e[v];
+                cs[v] = sqrt(gamma[v] * (gamma[v]-1.0) * e[v]);
+            }
+        }
 
-   void ComputeMaterialProperties(int nvalues, const double gamma[],
-                                  const double rho[], const double e[],
-                                  double p[], double cs[]) const
-   {
-      for (int v = 0; v < nvalues; v++)
-      {
-         p[v]  = (gamma[v] - 1.0) * rho[v] * e[v];
-         cs[v] = sqrt(gamma[v] * (gamma[v]-1.0) * e[v]);
-      }
-   }
+        void UpdateQuadratureData(const Vector &S) const;
 
-   void UpdateQuadratureData(const Vector &S) const;
+    public:
+        LagrangianHydroOperator(int size, ParFiniteElementSpace &h1_fes,
+                                ParFiniteElementSpace &l2_fes,
+                                Array<int> &essential_tdofs, ParGridFunction &rho0,
+                                int source_type_, double cfl_,
+                                Coefficient *material_, bool visc, bool pa,
+                                double cgt, int cgiter);
 
-public:
-   LagrangianHydroOperator(int size, ParFiniteElementSpace &h1_fes,
-                           ParFiniteElementSpace &l2_fes,
-                           Array<int> &essential_tdofs, ParGridFunction &rho0,
-                           int source_type_, double cfl_,
-                           Coefficient *material_, bool visc, bool pa,
-                           double cgt, int cgiter);
+        // Solve for dx_dt, dv_dt and de_dt.
+        virtual void Mult(const Vector &S, Vector &dS_dt) const;
 
-   // Solve for dx_dt, dv_dt and de_dt.
-   virtual void Mult(const Vector &S, Vector &dS_dt) const;
+        // Calls UpdateQuadratureData to compute the new quad_data.dt_est.
+        double GetTimeStepEstimate(const Vector &S) const;
+        void ResetTimeStepEstimate() const;
+        void ResetQuadratureData() const { quad_data_is_current = false; }
 
-   // Calls UpdateQuadratureData to compute the new quad_data.dt_est.
-   double GetTimeStepEstimate(const Vector &S) const;
-   void ResetTimeStepEstimate() const;
-   void ResetQuadratureData() const { quad_data_is_current = false; }
+        // The density values, which are stored only at some quadrature points, are
+        // projected as a ParGridFunction.
+        void ComputeDensity(ParGridFunction &rho);
 
-   // The density values, which are stored only at some quadrature points, are
-   // projected as a ParGridFunction.
-   void ComputeDensity(ParGridFunction &rho);
+        // The viscosity values, which are stored only at some quadrature points, are
+        // projected as a ParGridFunction.
+        void ComputeViscosity(ParGridFunction &rho);
 
-   void PrintTimingData(bool IamRoot, int steps);
+        void PrintTimingData(bool IamRoot, int steps);
 
-   ~LagrangianHydroOperator();
+        ~LagrangianHydroOperator();
 };
 
 class TaylorCoefficient : public Coefficient
 {
-   virtual double Eval(ElementTransformation &T,
-                       const IntegrationPoint &ip)
-   {
-      Vector x(2);
-      T.Transform(ip, x);
-      return 3.0 / 8.0 * M_PI * ( cos(3.0*M_PI*x(0)) * cos(M_PI*x(1)) -
-                                  cos(M_PI*x(0))     * cos(3.0*M_PI*x(1)) );
-   }
+    virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip)
+    {
+        Vector x(2);
+        T.Transform(ip, x);
+
+        return (3.0 / 8.0) * M_PI * (cos(3.0 * M_PI * x(0)) * cos(M_PI * x(1)) - cos(M_PI * x(0))     * cos(3.0 * M_PI * x(1)) );
+    }
 };
 
 } // namespace hydrodynamics

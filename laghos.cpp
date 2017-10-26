@@ -179,8 +179,9 @@ int main(int argc, char *argv[])
     if (product == num_tasks)
     {
         int *partitioning = mesh->CartesianPartitioning(nxyz);
-      pmesh = new ParMesh(MPI_COMM_WORLD, *mesh, partitioning);
-      delete partitioning;
+        pmesh = new ParMesh(MPI_COMM_WORLD, *mesh, partitioning);
+
+        delete partitioning;
     }
     else
     {
@@ -372,14 +373,16 @@ int main(int argc, char *argv[])
 
     LagrangianHydroOperator oper(S.Size(), H1FESpace, L2FESpace, ess_tdofs, rho, source, cfl, material_pcf, visc, p_assembly, cg_tol, cg_max_iter);
 
-    socketstream vis_rho, vis_v, vis_e;
+    socketstream vis_rho, vis_v, vis_e, vis_mu;
     char vishost[] = "localhost";
     int  visport   = 19916;
     ParGridFunction rho_gf;
+    ParGridFunction mu_gf;
 
     if (visualization || visit)
     {
         oper.ComputeDensity(rho_gf);
+        oper.ComputeViscosity(mu_gf);
     }
 
     if (visualization)
@@ -391,8 +394,8 @@ int main(int argc, char *argv[])
         vis_v.precision(8);
         vis_e.precision(8);
         int Wx = 0, Wy = 0; // window position
-        const int Ww = 350, Wh = 350; // window size
-        int offx = Ww+10; // window offsets
+        const int Ww = 600, Wh = 600; // window size
+        int offx = Ww + 10; // window offsets
 
         VisualizeField(vis_rho, vishost, visport, rho_gf, "Density", Wx, Wy, Ww, Wh);
         Wx += offx;
@@ -401,6 +404,11 @@ int main(int argc, char *argv[])
         Wx += offx;
 
         VisualizeField(vis_e, vishost, visport, e_gf, "Specific Internal Energy", Wx, Wy, Ww, Wh);
+        Wx = 0;
+        Wy += Wh + 10;
+
+        VisualizeField(vis_mu, vishost, visport, mu_gf, "Viscosity", Wx, Wy, Ww, Wh);
+        Wx += offx;
     }
 
     // Save data for VisIt visualization
@@ -504,13 +512,14 @@ int main(int argc, char *argv[])
             if (visualization || visit || gfprint)
             {
                 oper.ComputeDensity(rho_gf);
+                oper.ComputeViscosity(mu_gf);
             }
 
             if (visualization)
             {
                 int Wx = 0, Wy = 0; // window position
-                int Ww = 350, Wh = 350; // window size
-                int offx = Ww+10; // window offsets
+                int Ww = 600, Wh = 600; // window size
+                int offx = Ww + 10; // window offsets
 
                 VisualizeField(vis_rho, vishost, visport, rho_gf, "Density", Wx, Wy, Ww, Wh);
                 Wx += offx;
@@ -519,6 +528,10 @@ int main(int argc, char *argv[])
                 Wx += offx;
 
                 VisualizeField(vis_e, vishost, visport, e_gf, "Specific Internal Energy", Wx, Wy, Ww,Wh);
+                Wx = 0;
+                Wy += Wh + 10;
+
+                VisualizeField(vis_mu, vishost, visport, mu_gf, "Viscosity", Wx, Wy, Ww, Wh);
                 Wx += offx;
             }
 

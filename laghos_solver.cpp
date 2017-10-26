@@ -56,7 +56,7 @@ void VisualizeField(socketstream &sock, const char *vishost, int visport, ParGri
 
         if (myid == 0 && newly_opened)
         {
-            sock << "window_title '" << title << "'\n" << "window_geometry " << x << " " << y << " " << w << " " << h << "\n" << "keys maaAcl";
+            sock << "window_title '" << title << "'\n" << "window_geometry " << x << " " << y << " " << w << " " << h << "\n" << "keys maaAclRj";
 
             if (vec)
             {
@@ -425,6 +425,29 @@ void LagrangianHydroOperator::ComputeDensity(ParGridFunction &rho)
     }
 }
 
+void LagrangianHydroOperator::ComputeViscosity(ParGridFunction &mu)
+{
+    mu.SetSpace(&L2FESpace);
+
+    DenseMatrix Mmu(l2dofs_cnt);
+    Vector rhs(l2dofs_cnt), mu_z(l2dofs_cnt);
+    Array<int> dofs(l2dofs_cnt);
+    DenseMatrixInverse inv(&Mmu);
+    MassIntegrator mi(&integ_rule);
+    ViscosityIntegrator vi(quad_data);
+    vi.SetIntRule(&integ_rule);
+
+    for (int i = 0; i < nzones; i++)
+    {
+        vi.AssembleRHSElementVect(*L2FESpace.GetFE(i), *L2FESpace.GetElementTransformation(i), rhs);
+        mi.AssembleElementMatrix(*L2FESpace.GetFE(i), *L2FESpace.GetElementTransformation(i), Mmu);
+        inv.Factor();
+        inv.Mult(rhs, mu_z);
+        L2FESpace.GetElementDofs(i, dofs);
+        mu.SetSubVector(dofs, mu_z);
+    }
+}
+
 void LagrangianHydroOperator::PrintTimingData(bool IamRoot, int steps)
 {
     double my_rt[5], rt_max[5];
@@ -575,6 +598,7 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
         }
 
         // Batched computation of material properties.
+        asm("int $3");
         ComputeMaterialProperties(nqp_batch, gamma_b, rho_b, e_b, p_b, cs_b);
         z_id -= nzones_batch;
 
@@ -642,7 +666,7 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
                     Vector compr_dir(eig_vec_data, dim);
 
                     // Computes the initial->physical transformation Jacobian.
-                    mfem::Mult(Jpr, quad_data.Jac0inv(z_id*nqp + q), Jpi);
+                    mfem::Mult(Jpr, quad_data.Jac0inv(z_id * nqp + q), Jpi);
                     Vector ph_dir(dim); Jpi.Mult(compr_dir, ph_dir);
 
                     // Change of the initial mesh size in the compression direction.
@@ -658,6 +682,9 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
                     }
 
                     stress.Add(visc_coeff, sgrad_v);
+
+                    // Updated viscosity at the quadrature points
+                    quad_data.mu(z_id * nqp + q) = visc_coeff;
                 }
 
                 // Time step estimate at the point. Here the more relevant length
